@@ -1,7 +1,7 @@
 utils = github.com/goreleaser/goreleaser
 
 build:
-	go build -i
+	go build
 
 utils: $(utils)
 

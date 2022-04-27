@@ -4,38 +4,16 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/spiffe/spire-plugin-sdk/pluginmain"
+	workloadattestor "github.com/spiffe/spire-plugin-sdk/proto/spire/plugin/agent/workloadattestor/v1"
+
 	"github.com/godbus/dbus/v5"
-	"github.com/spiffe/spire/pkg/agent/plugin/workloadattestor"
-	"github.com/spiffe/spire/pkg/common/catalog"
-	"github.com/spiffe/spire/proto/spire/common"
-	spi "github.com/spiffe/spire/proto/spire/common/plugin"
 )
 
 const pluginName = "systemd"
 
-func BuiltIn() catalog.Plugin {
-	return builtin(New())
-}
-
-func builtin(p *Plugin) catalog.Plugin {
-	return catalog.MakePlugin(pluginName, workloadattestor.PluginServer(p))
-}
-
 type Plugin struct {
 	workloadattestor.UnsafeWorkloadAttestorServer
-}
-
-func New() *Plugin {
-	//New method should return the Plugin Type being implemented
-	return &Plugin{}
-}
-
-func (p *Plugin) Configure(ctx context.Context, req *spi.ConfigureRequest) (*spi.ConfigureResponse, error) {
-	return &spi.ConfigureResponse{}, nil
-}
-
-func (p *Plugin) GetPluginInfo(ctx context.Context, req *spi.GetPluginInfoRequest) (*spi.GetPluginInfoResponse, error) {
-	return &spi.GetPluginInfoResponse{}, nil
 }
 
 func (p *Plugin) Attest(ctx context.Context, req *workloadattestor.AttestRequest) (*workloadattestor.AttestResponse, error) {
@@ -51,7 +29,7 @@ func (p *Plugin) Attest(ctx context.Context, req *workloadattestor.AttestRequest
 		return nil, err
 	}
 
-	var selectors []*common.Selector
+	var selectorValues []string
 
 	// Get the location of the service file
 	fragmentPathVariant, err := conn.Object("org.freedesktop.systemd1", unitPath).GetProperty("org.freedesktop.systemd1.Unit.FragmentPath")
@@ -62,22 +40,24 @@ func (p *Plugin) Attest(ctx context.Context, req *workloadattestor.AttestRequest
 	if !ok {
 		return nil, fmt.Errorf("Returned fragment path was not a string: %v", fragmentPathVariant.String())
 	}
-	selectors = append(selectors, makeSelector("fragmentPath", fragmentPath))
+	selectorValues = append(selectorValues, makeSelectorValue("fragmentPath", fragmentPath))
 
 	// TODO(zecke): Add other interesting bits of the unit.
 
 	return &workloadattestor.AttestResponse{
-		Selectors: selectors,
+		SelectorValues: selectorValues,
 	}, nil
 }
 
-func makeSelector(kind, value string) *common.Selector {
-	return &common.Selector{
-		Type:  pluginName,
-		Value: fmt.Sprintf("%s:%s", kind, value),
-	}
+func makeSelectorValue(kind, value string) string {
+	return fmt.Sprintf("%s:%s", kind, value)
 }
 
 func main() {
-	catalog.PluginMain(BuiltIn())
+	plugin := new(Plugin)
+	// Serve the plugin. This function call will not return. If there is a
+	// failure to serve, the process will exit with a non-zero exit code.
+	pluginmain.Serve(
+		workloadattestor.WorkloadAttestorPluginServer(plugin),
+	)
 }
